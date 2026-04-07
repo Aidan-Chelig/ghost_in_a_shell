@@ -1,23 +1,29 @@
-{ config, lib, pkgs, modulesPath, ... }:
+{ config, lib, pkgs, hostPkgs, modulesPath, ... }:
 
 {
   imports = [
     "${modulesPath}/profiles/minimal.nix"
+    "${modulesPath}/profiles/qemu-guest.nix"
   ];
-
   networking.hostName = "argvm";
+system.switch.enable = true;
+environment.etc."init".source = "/nix/var/nix/profiles/system/init";
 
-  boot.loader.grub.enable = false;
-  boot.loader.systemd-boot.enable = false;
+  boot = {
+    loader = {
+      grub.enable = false;
+      systemd-boot.enable = false;
+    };
 
-  boot.kernelParams = [
+
+  kernelParams = [
     "console=hvc0"
     "root=/dev/vda"
     "rw"
     "loglevel=4"
   ];
 
-  boot.initrd.availableKernelModules = [
+  initrd.availableKernelModules = [
     "virtio_blk"
     "virtio_pci"
     "virtio_net"
@@ -25,14 +31,15 @@
     "overlay"
   ];
 
-  boot.supportedFilesystems = [
+  supportedFilesystems = [
     "ext4"
     "overlay"
     "9p"
   ];
 
   # Keep the kernel fairly boring at first.
-  boot.kernelPackages = pkgs.linuxPackages;
+  kernelPackages = pkgs.linuxPackages;
+  };
 
   fileSystems."/" = {
     device = "/dev/vda";
@@ -92,14 +99,16 @@
 
 
 
-system.build.argRawImage = import "${pkgs.path}/nixos/lib/make-disk-image.nix" {
-  inherit lib config pkgs;
+system.build.argRawImage = import "${hostPkgs.path}/nixos/lib/make-disk-image.nix" {
+  inherit lib config;
+  pkgs = hostPkgs;
   name = "argvm-riscv64-image";
   baseName = "argvm-riscv64";
   format = "raw";
   partitionTableType = "none";
   copyChannel = false;
-  diskSize = 2048;
+  installBootLoader = true;
+  diskSize = 8192;
 };
 
   system.stateVersion = "25.11";

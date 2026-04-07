@@ -1,6 +1,7 @@
 {
   description = "ARG horror Linux guest (RISC-V, Nix, QEMU/crosvm)";
 
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
@@ -17,18 +18,26 @@
       forAllSystems = f:
         lib.genAttrs supportedHostSystems (system: f system);
 
-      mkGuest = hostSystem:
-        lib.nixosSystem {
-          system = hostSystem;
-          modules = [
-            ./guest/base.nix
-            ({ ... }: {
-              nixpkgs.buildPlatform = hostSystem;
-              nixpkgs.hostPlatform = "riscv64-linux";
-              nixpkgs.config.allowUnsupportedSystem = true;
-            })
-          ];
-        };
+mkGuest = hostSystem:
+  let
+    hostPkgs = import nixpkgs {
+      system = hostSystem;
+    };
+  in
+  lib.nixosSystem {
+    system = hostSystem;
+    specialArgs = {
+      inherit hostPkgs;
+    };
+    modules = [
+      ./guest/base.nix
+      ({ ... }: {
+        nixpkgs.buildPlatform = hostSystem;
+        nixpkgs.hostPlatform = "riscv64-linux";
+        nixpkgs.config.allowUnsupportedSystem = true;
+      })
+    ];
+  };
     in
     {
       nixosConfigurations =
@@ -52,24 +61,31 @@
           run-qemu = pkgs.writeShellApplication {
             name = "run-qemu";
             runtimeInputs = with pkgs; [ qemu e2fsprogs coreutils ];
-            text = ''
-              set -euo pipefail
+text = ''
+  set -euo pipefail
 
-              KERNEL="${guest.config.system.build.kernel}/Image"
-              INITRD="${guest.config.system.build.initialRamdisk}/initrd"
-DISK="${guest.config.system.build.argRawImage}/argvm-riscv64.raw"
+  KERNEL="${guest.config.system.build.kernel}/Image"
+  INITRD="${guest.config.system.build.initialRamdisk}/initrd"
+  SRC_DISK="${guest.config.system.build.argRawImage}/argvm-riscv64.img"
 
-              exec qemu-system-riscv64 \
-                -machine virt \
-                -m 1024 \
-                -smp 2 \
-                -nographic \
-                -bios default \
-                -kernel "$KERNEL" \
-                -initrd "$INITRD" \
-                -append "console=hvc0 root=/dev/vda rw" \
-                -drive "file=$DISK,format=raw,if=virtio"
-            '';
+  TMPDIR="$(mktemp -d)"
+  trap 'rm -rf "$TMPDIR"' EXIT
+
+  DISK="$TMPDIR/argvm-riscv64.img"
+  cp --reflink=auto "$SRC_DISK" "$DISK"
+  chmod u+w "$DISK"
+
+  exec qemu-system-riscv64 \
+    -machine virt \
+    -m 1024 \
+    -smp 2 \
+    -nographic \
+    -bios default \
+    -kernel "$KERNEL" \
+    -initrd "$INITRD" \
+    -append "console=ttyS0 root=/dev/vda rw loglevel=7 systemd.log_level=debug" \
+    -drive "file=$DISK,format=raw,if=virtio"
+'';
           };
 
           run-crosvm = pkgs.writeShellApplication {
@@ -107,7 +123,7 @@ DISK="${guest.config.system.build.argRawImage}/argvm-riscv64.raw"
               rustfmt
               clippy
               pkg-config
-              qemu
+              qemu_full
               crosvm
               e2fsprogs
               dosfstools
