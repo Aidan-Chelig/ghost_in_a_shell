@@ -90,17 +90,17 @@
     echo
   '';
 
-  # Raw image for qemu/crosvm.
-  image.fileName = "argvm-riscv64.raw";
 
-  system.build.argRawImage = import "${pkgs.path}/nixos/lib/make-disk-image.nix" {
-    inherit lib config pkgs;
-    format = "raw";
-    partitionTableType = "none";
-    copyChannel = false;
-    compressImage = false;
-    diskSize = 2048;
-  };
+
+system.build.argRawImage = import "${pkgs.path}/nixos/lib/make-disk-image.nix" {
+  inherit lib config pkgs;
+  name = "argvm-riscv64-image";
+  baseName = "argvm-riscv64";
+  format = "raw";
+  partitionTableType = "none";
+  copyChannel = false;
+  diskSize = 2048;
+};
 
   system.stateVersion = "25.11";
 }

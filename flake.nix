@@ -29,8 +29,6 @@
             })
           ];
         };
-
-      guestNameFor = hostSystem: "arg-riscv-${hostSystem}";
     in
     {
       nixosConfigurations =
@@ -38,7 +36,7 @@
 
       packages = forAllSystems (hostSystem:
         let
-          guest = self.nixosConfigurations.${guestNameFor hostSystem};
+          guest = self.nixosConfigurations.${hostSystem};
           pkgs = import nixpkgs {
             system = hostSystem;
           };
@@ -59,7 +57,7 @@
 
               KERNEL="${guest.config.system.build.kernel}/Image"
               INITRD="${guest.config.system.build.initialRamdisk}/initrd"
-              DISK="${guest.config.system.build.argRawImage}/${guest.config.image.fileName}"
+DISK="${guest.config.system.build.argRawImage}/argvm-riscv64.raw"
 
               exec qemu-system-riscv64 \
                 -machine virt \
@@ -114,7 +112,7 @@
               e2fsprogs
               dosfstools
               mtools
-              sfdisk
+              util-linux
               fd
               ripgrep
               just
