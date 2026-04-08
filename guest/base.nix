@@ -73,8 +73,22 @@ in
     tree
     vim
     which
+    attr
     (callPackage ./pkgs/story-agent.nix { })
+    (callPackage ./pkgs/ghost-agent.nix { })
   ];
+
+systemd.tmpfiles.rules = [
+  "d /run/ghost 0755 root root -"
+  "d /root/world 0755 root root -"
+  "d /root/world/office 0755 root root -"
+  "f /run/ghost/current-cwd 0644 root root -"
+];
+
+environment.etc."ghost-seed-world.sh".text = ''
+  mkdir -p /root/world/office
+  echo "Something is wrong with this machine." > /root/world/office/note.txt || true
+'';
 
   systemd.services.story-agent = {
     description = "ARG story agent";
@@ -87,12 +101,59 @@ in
     };
   };
 
-  programs.bash.interactiveShellInit = ''
-    export PS1="[\u@argvm \w]\\$ "
-    echo
-    echo "ARGVM boot complete (${guestSystem})."
-    echo
-  '';
+systemd.services.ghost-seed-world = {
+  description = "Seed ghost world";
+  wantedBy = [ "multi-user.target" ];
+  before = [ "ghost-agent.service" ];
+  serviceConfig = {
+    Type = "oneshot";
+    ExecStart = "${pkgs.writeShellScript "ghost-seed-world" ''
+      mkdir -p /root/world/office
+      if [ ! -e /root/world/office/note.txt ]; then
+        echo "Something is wrong with this machine." > /root/world/office/note.txt
+      fi
+      ${pkgs.attr}/bin/setfattr -n user.ghost.kind -v room /root/world/office || true
+      ${pkgs.attr}/bin/setfattr -n user.ghost.label -v Office /root/world/office || true
+      ${pkgs.attr}/bin/setfattr -n user.ghost.kind -v note /root/world/office/note.txt || true
+      ${pkgs.attr}/bin/setfattr -n user.ghost.label -v "Pinned Note" /root/world/office/note.txt || true
+    ''}";
+  };
+};
+
+systemd.services.ghost-agent = {
+  description = "Ghost host communication agent";
+  wantedBy = [ "multi-user.target" ];
+  after = [ "network.target" ];
+  serviceConfig = {
+    ExecStart = "${pkgs.callPackage ./pkgs/ghost-agent.nix { }}/bin/ghost-agent";
+    Restart = "always";
+    RestartSec = 2;
+  };
+};
+
+programs.bash.interactiveShellInit = ''
+  export PS1="[\u@argvm \w]\\$ "
+  echo
+  echo "ARGVM boot complete (${guestSystem})."
+  echo
+
+  __ghost_last_pwd=""
+  __ghost_emit_cwd() {
+    if [ "$PWD" != "$__ghost_last_pwd" ]; then
+      mkdir -p /run/ghost
+      printf '%s\n' "$PWD" > /run/ghost/current-cwd.tmp
+      mv /run/ghost/current-cwd.tmp /run/ghost/current-cwd
+      __ghost_last_pwd="$PWD"
+    fi
+  }
+
+  case ";$PROMPT_COMMAND;" in
+    *";__ghost_emit_cwd;"*) ;;
+    *)
+    PROMPT_COMMAND="__ghost_emit_cwd''${PROMPT_COMMAND:+;''$PROMPT_COMMAND}"
+      ;;
+  esac
+'';
 
   system.build.argRootFs =
     hostPkgs.callPackage "${hostPkgs.path}/nixos/lib/make-ext4-fs.nix" {

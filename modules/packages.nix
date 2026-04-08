@@ -1,40 +1,23 @@
 { lib, ... }:
 {
   perSystem =
-    { pkgs, system, guests, ... }:
+    { pkgs, guestDefs, guests, hostPkgs, ... }:
     let
       rustToolchain = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
 
-      qemuKernelPath =
-        guestName:
-        let
-          guest = guests.${guestName};
-        in
-        if guestName == "x86_64"
-        then "${guest.config.system.build.kernel}/bzImage"
-        else "${guest.config.system.build.kernel}/Image";
-
-      crosvmKernelPath =
-        guestName:
-        let
-          guest = guests.${guestName};
-        in
-        if guestName == "x86_64"
-        then "${guest.config.system.build.kernel}/bzImage"
-        else throw "crosvm runner is only enabled for x86_64 guest right now";
-
-      consoleFor = guestName: "ttyS0";
+      guestImagePath = guest:
+        ''$(find ${guest.config.system.build.argRootFs} -maxdepth 1 -type f \( -name '*.img' -o -name '*.ext4' \) | head -n1)'';
 
       mkRunQemu =
         guestName:
         let
+          def = guestDefs.${guestName};
           guest = guests.${guestName};
-          kernel = qemuKernelPath guestName;
-          console = consoleFor guestName;
-          machine =
-            if guestName == "x86_64" then "-machine q35,accel=kvm:tcg" else "-machine virt";
-          qemuBin = if guestName == "x86_64" then "qemu-system-x86_64" else "qemu-system-riscv64";
-          maybeBios = if guestName == "riscv64" then "-bios default" else "";
+          kernel = def.qemu.kernelPath guest;
+          console = def.qemu.console;
+          qemuBin = def.qemu.systemBin;
+          machine = def.qemu.machine;
+          biosArg = lib.optionalString (def.qemu.bios != null) ''-bios "${def.qemu.bios}"'';
         in
         pkgs.writeShellApplication {
           name = "run-qemu-${guestName}";
@@ -44,7 +27,7 @@
 
             KERNEL="${kernel}"
             INITRD="${guest.config.system.build.initialRamdisk}/initrd"
-            SRC_DISK="$(find ${guest.config.system.build.argRootFs} -maxdepth 1 -type f \( -name '*.img' -o -name '*.ext4' \) | head -n1)"
+            SRC_DISK=${guestImagePath guest}
 
             TMPDIR="$(mktemp -d)"
             trap 'rm -rf "$TMPDIR"' EXIT
@@ -58,7 +41,7 @@
               -m 1024 \
               -smp 2 \
               -nographic \
-              ${maybeBios} \
+              ${biosArg} \
               -kernel "$KERNEL" \
               -initrd "$INITRD" \
               -append "console=${console} root=/dev/vda rw loglevel=7" \
@@ -69,9 +52,10 @@
       mkRunCrosvm =
         guestName:
         let
+          def = guestDefs.${guestName};
           guest = guests.${guestName};
-          kernel = crosvmKernelPath guestName;
-          console = consoleFor guestName;
+          kernel = def.crosvm.kernelPath guest;
+          console = def.crosvm.console;
         in
         pkgs.writeShellApplication {
           name = "run-crosvm-${guestName}";
@@ -81,7 +65,7 @@
 
             KERNEL="${kernel}"
             INITRD="${guest.config.system.build.initialRamdisk}/initrd"
-            SRC_DISK="$(find ${guest.config.system.build.argRootFs} -maxdepth 1 -type f \( -name '*.img' -o -name '*.ext4' \) | head -n1)"
+            SRC_DISK=${guestImagePath guest}
 
             TMPDIR="$(mktemp -d)"
             trap 'rm -rf "$TMPDIR"' EXIT
@@ -97,17 +81,16 @@
               --block path="$DISK",root=true,ro=false \
               --serial type=stdout,hardware=serial,num=1,console=true,stdin=true \
               --params "console=${console} loglevel=7" \
+              --vsock cid=3 \
               "$KERNEL"
           '';
         };
 
-      hostGame = pkgs.rustPlatform.buildRustPackage {
+      argHostUnwrapped = pkgs.rustPlatform.buildRustPackage {
         pname = "arg-host";
         version = "0.1.0";
         src = ../.;
-        cargoLock = {
-          lockFile = ../Cargo.lock;
-        };
+        cargoLock.lockFile = ../Cargo.lock;
 
         nativeBuildInputs = with pkgs; [
           pkg-config
@@ -126,10 +109,27 @@
           xorg.libXi
         ];
       };
+
+      guestX86 = guests.x86_64;
+      guestX86Def = guestDefs.x86_64;
+
+      argHost = pkgs.symlinkJoin {
+        name = "arg-host";
+        paths = [ argHostUnwrapped ];
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+        postBuild = ''
+          wrapProgram $out/bin/ghost-ina-shell \
+            --set ARGVM_CROSVM ${pkgs.lib.getExe pkgs.crosvm} \
+            --set ARGVM_KERNEL ${guestX86Def.crosvm.kernelPath guestX86} \
+            --set ARGVM_INITRD ${guestX86.config.system.build.initialRamdisk}/initrd \
+            --set ARGVM_ROOTFS $(find ${guestX86.config.system.build.argRootFs} -maxdepth 1 -type f \( -name '*.img' -o -name '*.ext4' \) | head -n1) \
+            --set ARGVM_CONSOLE ${guestX86Def.crosvm.console}
+        '';
+      };
     in
     {
       packages = {
-        default = guests.x86_64.config.system.build.argRootFs;
+        default = argHost;
 
         guest-x86_64-image = guests.x86_64.config.system.build.argRootFs;
         guest-x86_64-kernel = guests.x86_64.config.system.build.kernel;
@@ -142,7 +142,18 @@
         guest-riscv64-initrd = guests.riscv64.config.system.build.initialRamdisk;
         run-qemu-riscv64 = mkRunQemu "riscv64";
 
-        arg-host = hostGame;
+        arg-host-unwrapped = argHostUnwrapped;
+        arg-host = argHost;
+      };
+
+      apps.default = {
+        type = "app";
+        program = "${argHost}/bin/ghost-ina-shell";
+      };
+
+      apps.arg-host = {
+        type = "app";
+        program = "${argHost}/bin/ghost-ina-shell";
       };
     };
 }

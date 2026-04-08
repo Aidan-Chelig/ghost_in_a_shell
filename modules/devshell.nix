@@ -31,7 +31,6 @@
 
           alsa-lib
           jack2
-
           lld
           clang
           just

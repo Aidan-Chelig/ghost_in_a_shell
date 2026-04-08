@@ -1,5 +1,7 @@
-{ inputs, lib, hostSystem, ... }:
+{ inputs, lib, ... }:
 let
+  hostSystem = "x86_64-linux";
+
   hostPkgs = import inputs.nixpkgs {
     system = hostSystem;
     overlays = [ (import inputs.rust-overlay) ];
@@ -69,11 +71,9 @@ in
     guest-riscv64 = guests.riscv64;
   };
 
-  perSystem =
-    { ... }:
-    {
-      _module.args = {
-        inherit guestDefs guests hostPkgs;
-      };
+  perSystem = { ... }: {
+    _module.args = {
+      inherit guestDefs guests hostPkgs;
     };
+  };
 }
