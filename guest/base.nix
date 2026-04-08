@@ -81,7 +81,7 @@ in
     wantedBy = [ "multi-user.target" ];
     after = [ "network-online.target" ];
     serviceConfig = {
-      ExecStart = "${pkgs.callPackage ../pkgs/story-agent.nix { }}/bin/story-agent";
+      ExecStart = "${pkgs.callPackage ./pkgs/story-agent.nix { }}/bin/story-agent";
       Restart = "always";
       RestartSec = 2;
     };
