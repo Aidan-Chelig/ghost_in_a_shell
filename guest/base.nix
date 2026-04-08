@@ -5,25 +5,20 @@
     "${modulesPath}/profiles/minimal.nix"
     "${modulesPath}/profiles/qemu-guest.nix"
   ];
+
   networking.hostName = "argvm";
-system.switch.enable = true;
-environment.etc."init".source = "/nix/var/nix/profiles/system/init";
 
-  boot = {
-    loader = {
-      grub.enable = false;
-      systemd-boot.enable = false;
-    };
+  boot.loader.grub.enable = false;
+  boot.loader.systemd-boot.enable = false;
 
-
-  kernelParams = [
-    "console=hvc0"
+  boot.kernelParams = [
+    "console=ttyS0"
     "root=/dev/vda"
     "rw"
-    "loglevel=4"
+    "loglevel=7"
   ];
 
-  initrd.availableKernelModules = [
+  boot.initrd.availableKernelModules = [
     "virtio_blk"
     "virtio_pci"
     "virtio_net"
@@ -31,29 +26,26 @@ environment.etc."init".source = "/nix/var/nix/profiles/system/init";
     "overlay"
   ];
 
-  supportedFilesystems = [
+  boot.supportedFilesystems = [
     "ext4"
     "overlay"
     "9p"
   ];
 
-  # Keep the kernel fairly boring at first.
-  kernelPackages = pkgs.linuxPackages;
-  };
+  boot.kernelPackages = pkgs.linuxPackages;
 
   fileSystems."/" = {
     device = "/dev/vda";
     fsType = "ext4";
-    autoResize = true;
+    autoResize = false;
   };
 
   networking.useDHCP = true;
 
   services.getty.autologinUser = "root";
+  systemd.services."serial-getty@ttyS0".enable = true;
 
-  users.users.root = {
-    initialPassword = "root";
-  };
+  users.users.root.initialPassword = "root";
 
   environment.systemPackages = with pkgs; [
     busybox
@@ -73,7 +65,6 @@ environment.etc."init".source = "/nix/var/nix/profiles/system/init";
     tree
     vim
     which
-
     (callPackage ../pkgs/story-agent.nix { })
   ];
 
@@ -88,7 +79,6 @@ environment.etc."init".source = "/nix/var/nix/profiles/system/init";
     };
   };
 
-  # Helpful for a terminal-first game box.
   programs.bash.interactiveShellInit = ''
     export PS1="[\u@argvm \w]\\$ "
     echo
@@ -97,19 +87,23 @@ environment.etc."init".source = "/nix/var/nix/profiles/system/init";
     echo
   '';
 
+  system.build.argRootFs = hostPkgs.callPackage "${hostPkgs.path}/nixos/lib/make-ext4-fs.nix" {
+    storePaths = [ config.system.build.toplevel ];
 
+    volumeLabel = "ARGROOT";
 
-system.build.argRawImage = import "${hostPkgs.path}/nixos/lib/make-disk-image.nix" {
-  inherit lib config;
-  pkgs = hostPkgs;
-  name = "argvm-riscv64-image";
-  baseName = "argvm-riscv64";
-  format = "raw";
-  partitionTableType = "none";
-  copyChannel = false;
-  installBootLoader = true;
-  diskSize = 8192;
-};
+    populateImageCommands = ''
+      mkdir -p ./files/nix/var/nix/profiles
+      mkdir -p ./files/etc
+
+      ln -s ${config.system.build.toplevel} ./files/nix/var/nix/profiles/system
+      ln -s /nix/var/nix/profiles/system/init ./files/init
+
+      cat > ./files/etc/hostname <<'EOF'
+      argvm
+      EOF
+    '';
+  };
 
   system.stateVersion = "25.11";
 }
