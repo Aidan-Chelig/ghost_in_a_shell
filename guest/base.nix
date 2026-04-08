@@ -1,9 +1,23 @@
-{ config, lib, pkgs, hostPkgs, modulesPath, ... }:
+{ config, lib, pkgs, hostPkgs, guestSystem, modulesPath, ... }:
 
+let
+  isX86 = guestSystem == "x86_64-linux";
+  isRiscv = guestSystem == "riscv64-linux";
+
+  console =
+    if isX86 then "ttyS0"
+    else if isRiscv then "ttyS0"
+    else "ttyS0";
+
+  qemuGuestImport =
+    if isX86
+    then "${modulesPath}/profiles/qemu-guest.nix"
+    else "${modulesPath}/profiles/qemu-guest.nix";
+in
 {
   imports = [
     "${modulesPath}/profiles/minimal.nix"
-    "${modulesPath}/profiles/qemu-guest.nix"
+    qemuGuestImport
   ];
 
   networking.hostName = "argvm";
@@ -12,7 +26,7 @@
   boot.loader.systemd-boot.enable = false;
 
   boot.kernelParams = [
-    "console=ttyS0"
+    "console=${console}"
     "root=/dev/vda"
     "rw"
     "loglevel=7"
@@ -26,13 +40,7 @@
     "overlay"
   ];
 
-  boot.supportedFilesystems = [
-    "ext4"
-    "overlay"
-    "9p"
-  ];
-
-  boot.kernelPackages = pkgs.linuxPackages;
+  boot.supportedFilesystems = [ "ext4" "overlay" "9p" ];
 
   fileSystems."/" = {
     device = "/dev/vda";
@@ -43,7 +51,7 @@
   networking.useDHCP = true;
 
   services.getty.autologinUser = "root";
-  systemd.services."serial-getty@ttyS0".enable = true;
+  systemd.services."serial-getty@${console}".enable = true;
 
   users.users.root.initialPassword = "root";
 
@@ -65,7 +73,7 @@
     tree
     vim
     which
-    (callPackage ../pkgs/story-agent.nix { })
+    (callPackage ./pkgs/story-agent.nix { })
   ];
 
   systemd.services.story-agent = {
@@ -82,28 +90,26 @@
   programs.bash.interactiveShellInit = ''
     export PS1="[\u@argvm \w]\\$ "
     echo
-    echo "ARGVM boot complete."
-    echo "Type 'journalctl -b' or inspect /var/log."
+    echo "ARGVM boot complete (${guestSystem})."
     echo
   '';
 
-  system.build.argRootFs = hostPkgs.callPackage "${hostPkgs.path}/nixos/lib/make-ext4-fs.nix" {
-    storePaths = [ config.system.build.toplevel ];
+  system.build.argRootFs =
+    hostPkgs.callPackage "${hostPkgs.path}/nixos/lib/make-ext4-fs.nix" {
+      storePaths = [ config.system.build.toplevel ];
+      volumeLabel = "ARGROOT";
+      populateImageCommands = ''
+        mkdir -p ./files/nix/var/nix/profiles
+        mkdir -p ./files/etc
 
-    volumeLabel = "ARGROOT";
+        ln -s ${config.system.build.toplevel} ./files/nix/var/nix/profiles/system
+        ln -s /nix/var/nix/profiles/system/init ./files/init
 
-    populateImageCommands = ''
-      mkdir -p ./files/nix/var/nix/profiles
-      mkdir -p ./files/etc
-
-      ln -s ${config.system.build.toplevel} ./files/nix/var/nix/profiles/system
-      ln -s /nix/var/nix/profiles/system/init ./files/init
-
-      cat > ./files/etc/hostname <<'EOF'
-      argvm
-      EOF
-    '';
-  };
+        cat > ./files/etc/hostname <<'EOF'
+        argvm
+        EOF
+      '';
+    };
 
   system.stateVersion = "25.11";
 }
