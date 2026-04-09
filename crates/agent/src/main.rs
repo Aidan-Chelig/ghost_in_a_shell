@@ -1,9 +1,4 @@
-#[path = "../protocol.rs"]
-mod protocol;
-#[path = "../vsock.rs"]
-mod vsock;
-
-use protocol::{GuestEvent, HostCommand, NodeKind, WorldNode};
+use message_protocol::protocol::{GuestEvent, HostCommand, NodeKind, WorldNode};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -12,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
-use vsock::{VMADDR_CID_HOST, VsockStream};
+use message_protocol::vsock::{VMADDR_CID_HOST, VsockStream};
 
 const HOST_PORT: u32 = 7000;
 const WORLD_ROOT: &str = "/root/world";

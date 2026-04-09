@@ -125,7 +125,7 @@ systemd.services.ghost-agent = {
   wantedBy = [ "multi-user.target" ];
   after = [ "network.target" ];
   serviceConfig = {
-    ExecStart = "${pkgs.callPackage ./pkgs/ghost-agent.nix { }}/bin/ghost-agent";
+    ExecStart = "${pkgs.callPackage ./pkgs/ghost-agent.nix { }}/bin/agent";
     Restart = "always";
     RestartSec = 2;
   };

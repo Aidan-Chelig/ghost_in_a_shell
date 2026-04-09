@@ -13,6 +13,8 @@
 
     flake-utils.url = "github:numtide/flake-utils";
 
+    crane.url = "github:ipetkov/crane";
+
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs = {

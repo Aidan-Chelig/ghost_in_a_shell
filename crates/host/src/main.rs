@@ -1,16 +1,11 @@
-#[path = "../protocol.rs"]
-mod protocol;
-#[path = "../vsock.rs"]
-mod vsock;
-
-use protocol::{GuestEvent, HostCommand};
+use message_protocol::protocol::{GuestEvent, HostCommand};
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
-use vsock::VsockListener;
+use message_protocol::vsock::VsockListener;
 
 fn env_required(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("missing required env var: {name}"))
@@ -25,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let vsock_port: u32 = 7000;
     let listener = VsockListener::bind(vsock_port)?;
-    println!("[host] vsock listening on port {vsock_port}");
+    println!("[host-time] vsock listening on port {vsock_port}");
 
     let vsock_thread = thread::spawn(
         move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
