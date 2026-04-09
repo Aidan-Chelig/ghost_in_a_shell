@@ -1,3 +1,4 @@
+use bevy::render::view::NoIndirectDrawing;
 use message_protocol::protocol::{GuestEvent, HostCommand};
 use message_protocol::vsock::VsockListener;
 use std::env;
@@ -23,15 +24,25 @@ fn env_required(name: &str) -> String {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     //initVM();
+    //
+    //
+    let asset_dir = std::env::var("HOST_ASSET_DIR").unwrap_or_else(|_| "assets".to_string());
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Bevy + alacritty_terminal demo".into(),
-                resolution: (1200, 800).into(),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Bevy + alacritty_terminal demo".into(),
+                        resolution: (1200, 800).into(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    file_path: asset_dir,
+                    ..default()
+                }),
+        )
         .add_plugins(TerminalPlugin)
         .add_systems(Startup, setup)
         .add_systems(
@@ -171,7 +182,7 @@ fn initVM() -> Result<(), Box<dyn std::error::Error>> {
 struct TerminalRoot;
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, NoIndirectDrawing));
 
     let font = asset_server.load("fonts/JetBrainsMonoNerdFont-Regular.ttf");
 

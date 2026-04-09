@@ -230,6 +230,7 @@ fn key_event_to_bytes(event: &KeyboardInput) -> Option<Vec<u8>> {
         Key::PageUp => Some(b"\x1b[5~".to_vec()),
         Key::PageDown => Some(b"\x1b[6~".to_vec()),
         Key::Delete => Some(b"\x1b[3~".to_vec()),
+        Key::Space => Some(" ".as_bytes().to_vec()),
         Key::Character(text) => Some(text.as_str().as_bytes().to_vec()),
         _ => None,
     }

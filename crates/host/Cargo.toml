@@ -3,6 +3,9 @@ name = "host"
 version = "0.1.0"
 edition = "2024"
 
+[profile.dev.package.wgpu-types]
+debug-assertions = false
+
 [dependencies]
 tempfile = "3"
 serde = { version = "1", features = ["derive"] }
