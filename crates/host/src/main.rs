@@ -1,17 +1,54 @@
 use message_protocol::protocol::{GuestEvent, HostCommand};
+use message_protocol::vsock::VsockListener;
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
-use message_protocol::vsock::VsockListener;
+
+mod terminal;
+
+use bevy::prelude::*;
+use terminal::{
+    TerminalPlugin, copy_selection_system, keyboard_input_system, mouse_input_system,
+    mouse_wheel_system, spawn_terminal_backend, sync_terminal_view_system,
+};
+
+use crate::terminal::TerminalLine;
 
 fn env_required(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("missing required env var: {name}"))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    //initVM();
+    App::new()
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Bevy + alacritty_terminal demo".into(),
+                resolution: (1200, 800).into(),
+                ..default()
+            }),
+            ..default()
+        }))
+        .add_plugins(TerminalPlugin)
+        .add_systems(Startup, setup)
+        .add_systems(
+            Update,
+            (
+                keyboard_input_system,
+                mouse_input_system,
+                mouse_wheel_system,
+                copy_selection_system,
+                sync_terminal_view_system,
+            ),
+        )
+        .run();
+    return Ok(());
+}
+
+fn initVM() -> Result<(), Box<dyn std::error::Error>> {
     let crosvm = env_required("ARGVM_CROSVM");
     let kernel = env_required("ARGVM_KERNEL");
     let initrd = env_required("ARGVM_INITRD");
@@ -128,4 +165,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _ = vsock_thread.join();
     Ok(())
+}
+
+#[derive(Component)]
+struct TerminalRoot;
+
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.spawn(Camera2d);
+
+    let font = asset_server.load("fonts/JetBrainsMonoNerdFont-Regular.ttf");
+
+    let root = commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                padding: UiRect::all(Val::Px(12.0)),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.06, 0.06, 0.08)),
+            TerminalRoot,
+        ))
+        .id();
+
+    // 40 visible rows to start. This can be recalculated later from window size.
+    commands.entity(root).with_children(|parent| {
+        for row in 0..40 {
+            parent.spawn((
+                Text::new(""),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 18.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.85, 0.85, 0.85)),
+                Node {
+                    width: Val::Percent(100.0),
+                    ..default()
+                },
+                TerminalLine { row },
+            ));
+        }
+    });
+
+    spawn_terminal_backend(&mut commands);
 }
