@@ -1,10 +1,10 @@
-{ inputs, lib, ... }:
+{ inputs, lib, withSystem, ... }:
 let
   hostSystem = "x86_64-linux";
 
   hostPkgs = import inputs.nixpkgs {
     system = hostSystem;
-    overlays = [ (import inputs.rust-overlay) ];
+    overlays = [ inputs.rust-overlay.overlays.default ];
     config.allowUnfree = true;
   };
 
@@ -41,39 +41,47 @@ let
       };
     };
   };
-
-  mkGuest =
-    name:
-    let
-      def = guestDefs.${name};
-    in
-    inputs.nixpkgs.lib.nixosSystem {
-      system = hostSystem;
-      specialArgs = {
-        inherit hostPkgs;
-        guestSystem = def.guestSystem;
-      };
-      modules = [
-        ../guest/base.nix
-        ({ ... }: {
-          nixpkgs.buildPlatform = hostSystem;
-          nixpkgs.hostPlatform = def.guestSystem;
-          nixpkgs.config.allowUnsupportedSystem = true;
-        })
-      ];
-    };
-
-  guests = lib.mapAttrs (name: _: mkGuest name) guestDefs;
 in
 {
-  flake.nixosConfigurations = {
-    guest-x86_64 = guests.x86_64;
-    guest-riscv64 = guests.riscv64;
-  };
+  flake.nixosConfigurations =
+    let
+      mkGuest =
+        name:
+        let
+          def = guestDefs.${name};
+        in
+        withSystem hostSystem ({ config, ... }:
+          inputs.nixpkgs.lib.nixosSystem {
+            system = hostSystem;
+            specialArgs = {
+              inherit hostPkgs;
+              guestSystem = def.guestSystem;
+
+              argPackages = {
+                inherit (config.packages)
+                  agent
+                  story-agent;
+              };
+            };
+
+            modules = [
+              inputs.self.nixosModules.guest-base
+              ({ ... }: {
+                nixpkgs.buildPlatform = hostSystem;
+                nixpkgs.hostPlatform = def.guestSystem;
+                nixpkgs.config.allowUnsupportedSystem = true;
+              })
+            ];
+          });
+    in
+    {
+      guest-x86_64 = mkGuest "x86_64";
+      guest-riscv64 = mkGuest "riscv64";
+    };
 
   perSystem = { ... }: {
     _module.args = {
-      inherit guestDefs guests hostPkgs;
+      inherit guestDefs hostPkgs;
     };
   };
 }
