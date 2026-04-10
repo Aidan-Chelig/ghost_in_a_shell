@@ -11,19 +11,16 @@ use std::thread;
 mod terminal;
 
 use bevy::prelude::*;
-use terminal::{
-    TerminalPlugin, copy_selection_system, keyboard_input_system, mouse_input_system,
-    mouse_wheel_system, spawn_terminal_backend, sync_terminal_view_system,
-};
+use terminal::TerminalPlugin;
 
-use crate::terminal::TerminalLine;
+use crate::terminal::{TerminalLine, spawn_terminal_backend};
 
 fn env_required(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("missing required env var: {name}"))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    initVM();
+    //initVM();
 
     let asset_dir = std::env::var("HOST_ASSET_DIR").unwrap_or_else(|_| "assets".to_string());
 
@@ -190,7 +187,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         ))
         .id();
 
-    // 40 visible rows to start. This can be recalculated later from window size.
     commands.entity(root).with_children(|parent| {
         for row in 0..40 {
             parent.spawn((
@@ -203,6 +199,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                 TextColor(Color::srgb(0.85, 0.85, 0.85)),
                 Node {
                     width: Val::Percent(100.0),
+                    min_height: Val::Px(20.0),
                     ..default()
                 },
                 TerminalLine { row },
