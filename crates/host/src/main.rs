@@ -13,7 +13,10 @@ mod terminal;
 use bevy::prelude::*;
 use terminal::TerminalPlugin;
 
-use crate::terminal::{TerminalLine, spawn_terminal_backend};
+use crate::terminal::{
+    TerminalLine, TerminalLineBg, TerminalLineCursor, TerminalLineText, default_fg,
+    spawn_terminal_backend,
+};
 
 fn env_required(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("missing required env var: {name}"))
@@ -189,23 +192,62 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.entity(root).with_children(|parent| {
         for row in 0..40 {
-            parent.spawn((
-                Text::new(""),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.85, 0.85, 0.85)),
-                Node {
-                    width: Val::Percent(100.0),
-                    min_height: Val::Px(20.0),
-                    ..default()
-                },
-                TerminalLine { row },
-            ));
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        min_height: Val::Px(20.0),
+                        position_type: PositionType::Relative,
+                        ..default()
+                    },
+                    TerminalLine { row },
+                ))
+                .with_children(|row_parent| {
+                    row_parent.spawn((
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Px(20.0),
+                            flex_direction: FlexDirection::Row,
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            ..default()
+                        },
+                        TerminalLineBg { row },
+                    ));
+
+                    row_parent.spawn((
+                        Text::new(""),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 18.0,
+                            ..default()
+                        },
+                        TextColor(default_fg()),
+                        Node {
+                            width: Val::Percent(100.0),
+                            min_height: Val::Px(20.0),
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            ..default()
+                        },
+                        TerminalLineText { row },
+                    ));
+
+                    row_parent.spawn((
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Px(20.0),
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            ..default()
+                        },
+                        ZIndex(10),
+                        TerminalLineCursor { row },
+                    ));
+                });
         }
     });
-
-    spawn_terminal_backend(&mut commands);
 }
