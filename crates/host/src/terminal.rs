@@ -59,7 +59,17 @@ pub struct TerminalPlugin;
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PendingCopy::default())
-            .insert_resource(TerminalCursorBlink::default());
+            .insert_resource(TerminalCursorBlink::default())
+            .add_systems(
+                Update,
+                (
+                    keyboard_input_system,
+                    mouse_input_system,
+                    mouse_wheel_system,
+                    copy_selection_system,
+                    sync_terminal_view_system,
+                ),
+            );
     }
 }
 
@@ -257,11 +267,7 @@ pub fn mouse_wheel_system(
 
     {
         let mut term = terminal.term.lock();
-        term.scroll_display(if scroll_lines > 0 {
-            alacritty_terminal::grid::Scroll::Delta(scroll_lines)
-        } else {
-            alacritty_terminal::grid::Scroll::Delta(scroll_lines)
-        });
+        term.scroll_display(alacritty_terminal::grid::Scroll::Delta(scroll_lines));
     }
     terminal.dirty = true;
 }
@@ -348,11 +354,25 @@ pub fn sync_terminal_view_system(
         let term = terminal.term.lock();
         let content = term.renderable_content();
 
+        let visible_cells: Vec<_> = content.display_iter.collect();
+
         let mut rendered_rows: Vec<String> = vec![String::new(); terminal.rows];
 
-        for indexed in content.display_iter {
+        let min_line = visible_cells
+            .iter()
+            .map(|indexed| indexed.point.line.0)
+            .min()
+            .unwrap_or(0);
+
+        for indexed in visible_cells {
             let point = indexed.point;
-            let row = point.line.0 as usize;
+
+            let visual_row = point.line.0 - min_line;
+            if visual_row < 0 {
+                continue;
+            }
+
+            let row = visual_row as usize;
             if row >= rendered_rows.len() {
                 continue;
             }
@@ -365,11 +385,6 @@ pub fn sync_terminal_view_system(
 
             ensure_len(&mut rendered_rows[row], point.column.0 as usize);
             rendered_rows[row].push(if ch == '\0' { ' ' } else { ch });
-        }
-
-        if let Some(selection) = terminal.selection.as_ref() {
-            // very simple visual hint for now; real highlight comes later
-            let _ = selection;
         }
 
         for (line, mut text, mut color) in &mut q_lines {

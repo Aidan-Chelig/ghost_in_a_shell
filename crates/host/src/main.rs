@@ -23,10 +23,10 @@ fn env_required(name: &str) -> String {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    //initVM();
-    //
-    //
+    initVM();
+
     let asset_dir = std::env::var("HOST_ASSET_DIR").unwrap_or_else(|_| "assets".to_string());
+
     App::new()
         .add_plugins(
             DefaultPlugins
@@ -45,16 +45,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .add_plugins(TerminalPlugin)
         .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (
-                keyboard_input_system,
-                mouse_input_system,
-                mouse_wheel_system,
-                copy_selection_system,
-                sync_terminal_view_system,
-            ),
-        )
         .run();
     return Ok(());
 }
