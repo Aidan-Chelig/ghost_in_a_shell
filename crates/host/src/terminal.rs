@@ -29,11 +29,15 @@ use alacritty_terminal::{
 };
 
 #[derive(Resource)]
+pub struct TerminalIo {
+    pub rx: Receiver<Vec<u8>>,
+    pub tx: Sender<Vec<u8>>,
+}
+
+#[derive(Resource)]
 pub struct TerminalState {
     pub term: Arc<Mutex<Term<NoopListener>>>,
     pub parser: Arc<Mutex<alacritty_terminal::vte::ansi::Processor>>,
-    pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    pub rx: Receiver<Vec<u8>>,
     pub cols: usize,
     pub rows: usize,
     pub cell_width_px: f32,
@@ -41,6 +45,7 @@ pub struct TerminalState {
     pub selection_anchor: Option<Point>,
     pub selection: Option<Selection>,
     pub dirty: bool,
+    pub dirty_rows: Vec<bool>,
 }
 
 #[derive(Component)]
@@ -94,18 +99,20 @@ impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TerminalCursorBlink>()
             // startup
-            .add_systems(Startup, spawn_terminal_backend)
+            .add_systems(Startup, spawn_terminal_state)
             // update systems
             .add_systems(
                 Update,
                 (
+                    terminal_rx_system,
                     keyboard_input_system,
                     mouse_input_system,
                     mouse_wheel_system,
                     copy_selection_system,
                     cursor_blink_system,
                     sync_terminal_view_system,
-                ),
+                )
+                    .chain(),
             );
     }
 }
@@ -133,6 +140,7 @@ pub fn cursor_blink_system(
     let is_visible = cursor_blink_visible(&blink);
 
     if was_visible != is_visible {
+        terminal.dirty_rows.fill(true);
         terminal.dirty = true;
     }
 }
@@ -254,7 +262,29 @@ pub fn copy_selection_system(keys: Res<ButtonInput<KeyCode>>, terminal: ResMut<T
     }
 }
 
-pub fn spawn_terminal_backend(mut commands: Commands) {
+pub fn terminal_rx_system(
+    mut terminal: ResMut<TerminalState>,
+    io: Option<Res<TerminalIo>>,
+    mut blink: ResMut<TerminalCursorBlink>,
+) {
+    let Some(io) = io else { return };
+
+    let mut got_data = false;
+
+    while let Ok(buf) = io.rx.try_recv() {
+        let mut term = terminal.term.lock();
+        let mut parser = terminal.parser.lock();
+        parser.advance(&mut *term, &buf);
+        got_data = true;
+    }
+
+    if got_data {
+        reset_cursor_blink(&mut blink);
+        terminal.dirty = true;
+    }
+}
+
+pub fn spawn_terminal_state(mut commands: Commands) {
     let rows = 40usize;
     let cols = 120usize;
 
@@ -267,33 +297,9 @@ pub fn spawn_terminal_backend(mut commands: Commands) {
     )));
     let parser = Arc::new(Mutex::new(alacritty_terminal::vte::ansi::Processor::new()));
 
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows: rows as u16,
-            cols: cols as u16,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .unwrap();
-
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
-    let mut cmd = CommandBuilder::new(shell);
-    cmd.env("TERM", "xterm-256color");
-
-    pair.slave.spawn_command(cmd).unwrap();
-
-    let reader = pair.master.try_clone_reader().unwrap();
-    let writer = pair.master.take_writer().unwrap();
-
-    let (tx, rx) = unbounded::<Vec<u8>>();
-    spawn_reader_thread(reader, tx);
-
     commands.insert_resource(TerminalState {
         term,
         parser,
-        writer: Arc::new(Mutex::new(writer)),
-        rx,
         cols,
         rows,
         cell_width_px: 10.8,
@@ -301,6 +307,7 @@ pub fn spawn_terminal_backend(mut commands: Commands) {
         selection_anchor: None,
         selection: None,
         dirty: true,
+        dirty_rows: vec![true; rows],
     });
 }
 
@@ -331,18 +338,10 @@ fn spawn_reader_thread(mut reader: Box<dyn Read + Send>, tx: Sender<Vec<u8>>) {
 pub fn keyboard_input_system(
     mut evr_key: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut terminal: ResMut<TerminalState>,
+    io: Option<Res<TerminalIo>>,
     mut blink: ResMut<TerminalCursorBlink>,
 ) {
-    while let Ok(buf) = terminal.rx.try_recv() {
-        {
-            let mut term = terminal.term.lock();
-            let mut parser = terminal.parser.lock();
-            parser.advance(&mut *term, &buf);
-            reset_cursor_blink(&mut blink);
-        }
-        terminal.dirty = true;
-    }
+    let Some(io) = io else { return };
 
     for event in evr_key.read() {
         if event.state != ButtonState::Pressed {
@@ -351,7 +350,9 @@ pub fn keyboard_input_system(
 
         let mut bytes = None;
 
-        if keys.pressed(KeyCode::ControlLeft) {
+        let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+
+        if ctrl {
             match &event.logical_key {
                 Key::Character(ch) if ch.eq_ignore_ascii_case("v") => {
                     if let Ok(mut cb) = Clipboard::new() {
@@ -359,6 +360,9 @@ pub fn keyboard_input_system(
                             bytes = Some(text.into_bytes());
                         }
                     }
+                }
+                Key::Character(ch) if ch.eq_ignore_ascii_case("c") => {
+                    bytes = Some(vec![0x03]); // ETX
                 }
                 _ => {}
             }
@@ -369,7 +373,8 @@ pub fn keyboard_input_system(
         }
 
         if let Some(bytes) = bytes {
-            let _ = terminal.writer.lock().write_all(&bytes);
+            let _ = io.tx.send(bytes);
+            reset_cursor_blink(&mut blink);
         }
     }
 }
@@ -544,15 +549,6 @@ pub fn sync_terminal_view_system(
     q_text: Query<(Entity, &TerminalLineText, &TextFont)>,
     q_cursor: Query<(Entity, &TerminalLineCursor)>,
 ) {
-    while let Ok(buf) = terminal.rx.try_recv() {
-        {
-            let mut term = terminal.term.lock();
-            let mut parser = terminal.parser.lock();
-            parser.advance(&mut *term, &buf);
-        }
-        terminal.dirty = true;
-    }
-
     if !terminal.dirty {
         return;
     }

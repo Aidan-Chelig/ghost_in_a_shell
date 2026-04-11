@@ -9,13 +9,15 @@ use std::process::{Command, Stdio};
 use std::thread;
 
 mod terminal;
+mod vm;
+
+use terminal::TerminalPlugin;
+use vm::VmPlugin;
 
 use bevy::prelude::*;
-use terminal::TerminalPlugin;
 
 use crate::terminal::{
     TerminalLine, TerminalLineBg, TerminalLineCursor, TerminalLineText, default_fg,
-    spawn_terminal_backend,
 };
 
 fn env_required(name: &str) -> String {
@@ -23,8 +25,6 @@ fn env_required(name: &str) -> String {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    //initVM();
-
     let asset_dir = std::env::var("HOST_ASSET_DIR").unwrap_or_else(|_| "assets".to_string());
 
     App::new()
@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "Bevy + alacritty_terminal demo".into(),
+                        title: "Bevy + crosvm terminal".into(),
                         resolution: (1200, 800).into(),
                         ..default()
                     }),
@@ -43,10 +43,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ..default()
                 }),
         )
-        .add_plugins(TerminalPlugin)
+        .add_plugins((TerminalPlugin, VmPlugin))
         .add_systems(Startup, setup)
         .run();
-    return Ok(());
+    Ok(())
 }
 
 fn initVM() -> Result<(), Box<dyn std::error::Error>> {

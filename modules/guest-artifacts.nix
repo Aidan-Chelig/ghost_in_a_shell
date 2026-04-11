@@ -33,10 +33,7 @@ in
             INITRD="${guest.config.system.build.initialRamdisk}/initrd"
             SRC_DISK=${guestImagePath guest}
 
-            TMPDIR="$(mktemp -d)"
-            trap 'rm -rf "$TMPDIR"' EXIT
-
-            DISK="$TMPDIR/${guestName}.img"
+            DISK="$HOME/.local/share/ghost_in_a_shell/rootfs.img"
             cp --reflink=auto "$SRC_DISK" "$DISK"
             chmod u+w "$DISK"
 
@@ -59,27 +56,19 @@ in
           name = "run-crosvm-${guestName}";
           runtimeInputs = with pkgs; [ crosvm coreutils findutils ];
           text = ''
-            set -euo pipefail
-
             KERNEL="${def.crosvm.kernelPath guest}"
             INITRD="${guest.config.system.build.initialRamdisk}/initrd"
-            SRC_DISK=${guestImagePath guest}
 
-            TMPDIR="$(mktemp -d)"
-            trap 'rm -rf "$TMPDIR"' EXIT
-
-            DISK="$TMPDIR/${guestName}.img"
-            cp --reflink=auto "$SRC_DISK" "$DISK"
-            chmod u+w "$DISK"
+            DISK="$HOME/.local/share/ghost_in_a_shell/rootfs.img"
 
             exec crosvm run \
+              --disable-sandbox \
               --mem size=1024 \
               --cpus num-cores=2 \
               --initrd "$INITRD" \
               --block path="$DISK",root=true,ro=false \
               --serial type=stdout,hardware=serial,num=1,console=true,stdin=true \
               --params "console=${def.crosvm.console} loglevel=7" \
-              --vsock cid=3 \
               "$KERNEL"
           '';
         };
@@ -89,14 +78,58 @@ in
         paths = [ config.packages.host-unwrapped ];
         nativeBuildInputs = [ pkgs.makeWrapper ];
 
-        postBuild = ''
-          wrapProgram $out/bin/host \
-            --set ARGVM_CROSVM ${pkgs.lib.getExe pkgs.crosvm} \
-            --set ARGVM_KERNEL ${guestDefs.x86_64.crosvm.kernelPath guestX86} \
-            --set ARGVM_INITRD ${guestX86.config.system.build.initialRamdisk}/initrd \
-            --set ARGVM_ROOTFS $(find ${guestX86.config.system.build.argRootFs} -maxdepth 1 -type f \( -name '*.img' -o -name '*.ext4' \) | head -n1) \
-            --set ARGVM_CONSOLE ${guestDefs.x86_64.crosvm.console}
-        '';
+        postBuild =
+          let
+            rootfsStore = ''$(find ${guestX86.config.system.build.argRootFs} -maxdepth 1 -type f \( -name '*.img' -o -name '*.ext4' \) | head -n1)'';
+          in
+          ''
+            mkdir -p $out/libexec
+
+            mv $out/bin/host $out/libexec/host-real
+
+            wrapProgram $out/libexec/host-real \
+              --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [
+                pkgs.alsa-lib
+                pkgs.udev
+                pkgs.vulkan-loader
+                pkgs.libxkbcommon
+                pkgs.wayland
+                pkgs.xdotool
+              ]} \
+              --set ALSA_PLUGIN_DIR ${pkgs.pipewire}/lib/alsa-lib \
+              --set ALSA_CONFIG_PATH ${pkgs.alsa-lib}/share/alsa/alsa.conf \
+              --set HOST_ASSET_DIR ${config.packages.host-unwrapped}/share/host/assets \
+              --set XKB_CONFIG_ROOT ${pkgs.xkeyboard_config}/share/X11/xkb \
+              --set ARGVM_CROSVM ${pkgs.lib.getExe pkgs.crosvm} \
+              --set ARGVM_KERNEL ${guestDefs.x86_64.crosvm.kernelPath guestX86} \
+              --set ARGVM_INITRD ${guestX86.config.system.build.initialRamdisk}/initrd \
+              --set ARGVM_CONSOLE ${guestDefs.x86_64.crosvm.console}
+
+            cat > $out/bin/host <<EOF
+            #!${pkgs.bash}/bin/bash
+            set -euo pipefail
+
+            DATA_HOME="''${XDG_DATA_HOME:-\$HOME/.local/share}"
+            APPDIR="\$DATA_HOME/ghost_in_a_shell"
+            ROOTFS="\$APPDIR/rootfs.img"
+            ROOTFS_STORE="${rootfsStore}"
+
+            mkdir -p "\$APPDIR"
+
+            if [ ! -e "\$ROOTFS" ]; then
+              cp --reflink=never "\$ROOTFS_STORE" "\$ROOTFS"
+              chmod 600 "\$ROOTFS"
+            else
+              chmod 600 "\$ROOTFS" || true
+            fi
+
+            export ARGVM_ROOTFS="\$ROOTFS"
+
+            exec "$out/libexec/host-real" "\$@"
+            EOF
+
+            chmod +x $out/bin/host
+          '';
       };
     in
     {
@@ -112,7 +145,7 @@ in
         guest-riscv64-initrd = guestRiscv.config.system.build.initialRamdisk;
         run-qemu-riscv64 = mkRunQemu "riscv64" guestRiscv guestDefs.riscv64;
 
-        host = host;
+        inherit host;
         default = host;
       };
 
