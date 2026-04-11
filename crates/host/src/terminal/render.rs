@@ -1,3 +1,4 @@
+use super::{StyledRun, push_run};
 use bevy::prelude::*;
 
 use alacritty_terminal::vte::ansi::CursorShape;
@@ -6,28 +7,6 @@ use super::{
     TerminalCursorBlink, TerminalLineBg, TerminalLineCursor, TerminalLineText, TerminalState,
     cursor_blink_visible, cursor_color, default_bg, default_fg, term_bg_to_bevy, term_fg_to_bevy,
 };
-
-#[derive(Clone)]
-struct StyledRun {
-    text: String,
-    fg: Color,
-    bg: Color,
-}
-
-fn push_run(runs: &mut Vec<StyledRun>, ch: char, fg: Color, bg: Color) {
-    if let Some(last) = runs.last_mut() {
-        if last.fg == fg && last.bg == bg {
-            last.text.push(ch);
-            return;
-        }
-    }
-
-    runs.push(StyledRun {
-        text: ch.to_string(),
-        fg,
-        bg,
-    });
-}
 
 pub fn sync_terminal_view_system(
     mut commands: Commands,
@@ -67,7 +46,7 @@ pub fn sync_terminal_view_system(
                 continue;
             }
 
-            let col = c.point.column.0 as usize;
+            let col = c.point.column.0;
 
             if !seen_any_in_row[row] {
                 seen_any_in_row[row] = true;
@@ -100,7 +79,7 @@ pub fn sync_terminal_view_system(
             let row = visual_cursor_row_i32 as usize;
             if row < terminal.rows {
                 cursor_row = Some(row);
-                cursor_col = render_cursor.point.column.0 as usize;
+                cursor_col = render_cursor.point.column.0;
                 cursor_shape = Some(render_cursor.shape);
             }
         }
