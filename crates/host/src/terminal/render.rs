@@ -1,4 +1,4 @@
-use crate::terminal::{CachedCursor, CachedRowRender, TerminalRenderCache};
+use crate::terminal::{CachedCursor, CachedRowRender, TerminalLine, TerminalRenderCache};
 
 use super::{StyledRun, push_run};
 use bevy::prelude::*;
@@ -222,6 +222,48 @@ pub fn sync_terminal_view_system(
     }
 
     terminal.clear_dirty_flags();
+}
+
+pub fn sync_terminal_metrics_system(
+    terminal: Res<TerminalState>,
+    mut q: Query<(
+        Has<TerminalLine>,
+        Has<TerminalLineBg>,
+        Has<TerminalLineText>,
+        Has<TerminalLineCursor>,
+        &mut Node,
+        Option<&mut TextFont>,
+    )>,
+) {
+    if !terminal.is_changed() {
+        return;
+    }
+
+    let h = Val::Px(terminal.cell_height_px);
+
+    for (is_line, is_bg, is_text, is_cursor, mut node, font) in &mut q {
+        if is_line {
+            node.min_height = h;
+            node.height = h;
+        }
+
+        if is_bg {
+            node.height = h;
+        }
+
+        if is_text {
+            node.min_height = h;
+            node.height = h;
+
+            if let Some(mut font) = font {
+                font.font_size = terminal.font_size_px;
+            }
+        }
+
+        if is_cursor {
+            node.height = h;
+        }
+    }
 }
 
 fn cursor_dimensions(shape: CursorShape, cell_width: f32, cell_height: f32) -> (f32, f32, f32) {

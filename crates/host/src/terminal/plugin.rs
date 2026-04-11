@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use super::{
     TerminalCursorBlink, copy_selection_system, cursor_blink_system, keyboard_input_system,
-    mouse_input_system, mouse_wheel_system, spawn_terminal_state, sync_terminal_view_system,
-    terminal_rx_system,
+    mouse_input_system, mouse_wheel_system, spawn_terminal_state, sync_terminal_metrics_system,
+    sync_terminal_view_system, terminal_rx_system,
 };
 
 pub struct TerminalPlugin;
@@ -21,6 +21,7 @@ impl Plugin for TerminalPlugin {
                     mouse_wheel_system,
                     copy_selection_system,
                     cursor_blink_system,
+                    sync_terminal_metrics_system,
                     sync_terminal_view_system,
                 )
                     .chain(),

@@ -89,6 +89,21 @@ impl TerminalState {
         self.apply_font_size(DEFAULT_FONT_SIZE_PX);
         self.font_size_px != old
     }
+
+    pub fn resize_grid(&mut self, rows: usize, cols: usize) -> bool {
+        let rows = rows.max(1);
+        let cols = cols.max(1);
+
+        if self.rows == rows && self.cols == cols {
+            return false;
+        }
+
+        self.rows = rows;
+        self.cols = cols;
+        self.dirty_rows.resize(rows, true);
+        self.mark_all_rows_dirty();
+        true
+    }
 }
 
 #[derive(Component)]
@@ -230,4 +245,5 @@ pub fn spawn_terminal_state(mut commands: Commands) {
     state.apply_font_size(DEFAULT_FONT_SIZE_PX);
 
     commands.insert_resource(state);
+    commands.insert_resource(TerminalRenderCache::new(rows));
 }

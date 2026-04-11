@@ -78,6 +78,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                     Node {
                         width: Val::Percent(100.0),
                         min_height: Val::Px(20.0),
+                        height: Val::Px(20.0),
                         position_type: PositionType::Relative,
                         ..default()
                     },

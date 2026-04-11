@@ -49,7 +49,6 @@
           pname = "host-unwrapped";
           version = "0.1.0";
           inherit cargoArtifacts;
-          CARGO_PROFILE = "dev";
           cargoExtraArgs = "--bin host";
 
           postInstall = ''
