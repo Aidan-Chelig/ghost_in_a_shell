@@ -65,7 +65,7 @@ fn start_vm_system(mut commands: Commands) {
         .arg("--vsock")
         .arg("cid=3")
         .arg("--params")
-        .arg(format!("console={} loglevel=7", "ttyS0"))
+        .arg(format!("console={} loglevel=3", "ttyS0"))
         .arg(&kernel)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -78,7 +78,8 @@ fn start_vm_system(mut commands: Commands) {
 
     spawn_crosvm_stdout_thread(stdout, to_terminal_tx.clone());
     spawn_crosvm_stdin_thread(stdin, to_vm_rx);
-    spawn_vsock_thread(listener, to_terminal_tx);
+    //TODO: FIX
+    //spawn_vsock_thread(listener, to_terminal_tx);
 
     commands.insert_resource(VmSession { _child: child });
 }
@@ -86,26 +87,48 @@ fn start_vm_system(mut commands: Commands) {
 fn spawn_crosvm_stdout_thread(mut stdout: impl Read + Send + 'static, tx: Sender<Vec<u8>>) {
     thread::spawn(move || {
         let mut buf = vec![0u8; 16 * 1024];
+
         loop {
             match stdout.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let _ = tx.send(buf[..n].to_vec());
+                Ok(0) => {
+                    eprintln!("[vm] crosvm stdout EOF");
+                    break;
                 }
-                Err(_) => break,
+                Ok(n) => {
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        eprintln!("[vm] terminal receiver dropped; stdout thread exiting");
+                        break;
+                    }
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {
+                    continue;
+                }
+                Err(err) => {
+                    eprintln!("[vm] crosvm stdout read error: {err}");
+                    break;
+                }
             }
         }
+
+        eprintln!("[vm] crosvm stdout thread exited");
     });
 }
 
 fn spawn_crosvm_stdin_thread(mut stdin: impl Write + Send + 'static, rx: Receiver<Vec<u8>>) {
     thread::spawn(move || {
         while let Ok(buf) = rx.recv() {
-            if stdin.write_all(&buf).is_err() {
+            if let Err(err) = stdin.write_all(&buf) {
+                eprintln!("[vm] crosvm stdin write error: {err}");
                 break;
             }
-            let _ = stdin.flush();
+
+            if let Err(err) = stdin.flush() {
+                eprintln!("[vm] crosvm stdin flush error: {err}");
+                break;
+            }
         }
+
+        eprintln!("[vm] crosvm stdin thread exited");
     });
 }
 

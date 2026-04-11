@@ -19,8 +19,31 @@ use super::{TerminalCursorBlink, TerminalIo, TerminalState, reset_cursor_blink};
 
 pub fn mouse_wheel_system(
     mut evr_wheel: MessageReader<MouseWheel>,
+    keys: Res<ButtonInput<KeyCode>>,
     mut terminal: ResMut<TerminalState>,
+    mut blink: ResMut<TerminalCursorBlink>,
 ) {
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+
+    if ctrl {
+        let mut changed = false;
+
+        for event in evr_wheel.read() {
+            if event.y > 0.0 {
+                changed |= terminal.zoom_in();
+            } else if event.y < 0.0 {
+                changed |= terminal.zoom_out();
+            }
+        }
+
+        if changed {
+            terminal.mark_all_rows_dirty();
+            reset_cursor_blink(&mut blink);
+        }
+
+        return;
+    }
+
     let mut scroll_lines: i32 = 0;
 
     for event in evr_wheel.read() {
@@ -128,6 +151,7 @@ pub fn keyboard_input_system(
     mut evr_key: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
     io: Option<Res<TerminalIo>>,
+    mut terminal: ResMut<TerminalState>,
     mut blink: ResMut<TerminalCursorBlink>,
 ) {
     let Some(io) = io else {
@@ -144,7 +168,17 @@ pub fn keyboard_input_system(
         let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
 
         if ctrl {
+            let mut zoom_changed = false;
             match &event.logical_key {
+                Key::Character(ch) if ch == "+" => {
+                    zoom_changed = terminal.zoom_in();
+                }
+                Key::Character(ch) if ch == "=" => {
+                    zoom_changed = terminal.zoom_in();
+                }
+                Key::Character(ch) if ch == "-" => {
+                    zoom_changed = terminal.zoom_out();
+                }
                 Key::Character(ch) if ch.eq_ignore_ascii_case("v") => {
                     if let Ok(mut cb) = Clipboard::new() {
                         if let Ok(text) = cb.get_text() {
@@ -156,6 +190,11 @@ pub fn keyboard_input_system(
                     bytes = Some(vec![0x03]);
                 }
                 _ => {}
+            }
+            if zoom_changed {
+                terminal.mark_all_rows_dirty();
+                reset_cursor_blink(&mut blink);
+                continue;
             }
         }
 

@@ -25,7 +25,7 @@ pub fn terminal_rx_system(
 
     if got_data {
         reset_cursor_blink(&mut blink);
-        terminal.dirty = true;
+        terminal.mark_all_rows_dirty();
     }
 }
 

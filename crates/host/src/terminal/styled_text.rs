@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StyledRun {
     pub text: String,
     pub fg: Color,

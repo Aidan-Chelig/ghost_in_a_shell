@@ -1,3 +1,5 @@
+use crate::terminal::{CachedCursor, CachedRowRender, TerminalRenderCache};
+
 use super::{StyledRun, push_run};
 use bevy::prelude::*;
 
@@ -12,6 +14,7 @@ pub fn sync_terminal_view_system(
     mut commands: Commands,
     mut terminal: ResMut<TerminalState>,
     blink: Res<TerminalCursorBlink>,
+    mut cache: ResMut<TerminalRenderCache>,
     q_bg: Query<(Entity, &TerminalLineBg)>,
     q_text: Query<(Entity, &TerminalLineText, &TextFont)>,
     q_cursor: Query<(Entity, &TerminalLineCursor)>,
@@ -20,7 +23,16 @@ pub fn sync_terminal_view_system(
         return;
     }
 
-    let mut rows: Vec<Vec<StyledRun>> = vec![Vec::new(); terminal.rows];
+    let show_cursor = cursor_blink_visible(&blink);
+
+    let mut next_rows: Vec<CachedRowRender> = vec![
+        CachedRowRender {
+            runs: Vec::new(),
+            cursor: None,
+        };
+        terminal.rows
+    ];
+
     let mut cursor_row: Option<usize> = None;
     let mut cursor_col: usize = 0;
     let mut cursor_shape: Option<CursorShape> = None;
@@ -42,22 +54,22 @@ pub fn sync_terminal_view_system(
             }
 
             let row = visual_row_i32 as usize;
-            if row >= rows.len() {
+            if row >= next_rows.len() {
                 continue;
             }
 
-            let col = c.point.column.0;
+            let col = c.point.column.0 as usize;
 
             if !seen_any_in_row[row] {
                 seen_any_in_row[row] = true;
                 if col > 0 {
                     for _ in 0..col {
-                        push_run(&mut rows[row], ' ', default_fg(), default_bg());
+                        push_run(&mut next_rows[row].runs, ' ', default_fg(), default_bg());
                     }
                 }
             } else if col > last_col_per_row[row] + 1 {
                 for _ in (last_col_per_row[row] + 1)..col {
-                    push_run(&mut rows[row], ' ', default_fg(), default_bg());
+                    push_run(&mut next_rows[row].runs, ' ', default_fg(), default_bg());
                 }
             }
 
@@ -69,7 +81,7 @@ pub fn sync_terminal_view_system(
             let fg = term_fg_to_bevy(c.cell);
             let bg = term_bg_to_bevy(c.cell);
 
-            push_run(&mut rows[row], ch, fg, bg);
+            push_run(&mut next_rows[row].runs, ch, fg, bg);
             last_col_per_row[row] = col;
         }
 
@@ -79,20 +91,49 @@ pub fn sync_terminal_view_system(
             let row = visual_cursor_row_i32 as usize;
             if row < terminal.rows {
                 cursor_row = Some(row);
-                cursor_col = render_cursor.point.column.0;
+                cursor_col = render_cursor.point.column.0 as usize;
                 cursor_shape = Some(render_cursor.shape);
             }
         }
     }
 
-    for (entity, bg_line) in &q_bg {
-        commands.entity(entity).despawn_children();
+    if let Some(row) = cursor_row {
+        let shape = cursor_shape.unwrap_or(CursorShape::Block);
+        next_rows[row].cursor = Some(CachedCursor {
+            col: cursor_col,
+            shape,
+            visible: show_cursor,
+        });
+    }
 
-        if bg_line.row >= rows.len() {
+    if cache.last_cursor_row != cursor_row {
+        if let Some(old_row) = cache.last_cursor_row {
+            terminal.mark_row_dirty(old_row);
+        }
+        if let Some(new_row) = cursor_row {
+            terminal.mark_row_dirty(new_row);
+        }
+        cache.last_cursor_row = cursor_row;
+    }
+
+    for row in 0..terminal.rows {
+        let next = &next_rows[row];
+        let prev = cache.rows[row].as_ref();
+
+        if prev != Some(next) {
+            terminal.mark_row_dirty(row);
+        }
+    }
+
+    for (entity, bg_line) in &q_bg {
+        let row = bg_line.row;
+        if row >= terminal.rows || !terminal.dirty_rows[row] {
             continue;
         }
 
-        let runs = &rows[bg_line.row];
+        commands.entity(entity).despawn_children();
+
+        let runs = &next_rows[row].runs;
         let cell_width_px = terminal.cell_width_px;
         let cell_height_px = terminal.cell_height_px;
 
@@ -113,14 +154,16 @@ pub fn sync_terminal_view_system(
     }
 
     for (entity, text_line, parent_font) in &q_text {
-        commands.entity(entity).despawn_children();
-
-        if text_line.row >= rows.len() {
+        let row = text_line.row;
+        if row >= terminal.rows || !terminal.dirty_rows[row] {
             continue;
         }
 
-        let runs = &rows[text_line.row];
-        let font = parent_font.clone();
+        commands.entity(entity).despawn_children();
+
+        let runs = &next_rows[row].runs;
+        let mut font = parent_font.clone();
+        font.font_size = terminal.font_size_px;
 
         commands.entity(entity).with_children(|parent| {
             for run in runs {
@@ -133,24 +176,29 @@ pub fn sync_terminal_view_system(
         });
     }
 
-    let show_cursor = cursor_blink_visible(&blink);
-
     for (entity, cursor_line) in &q_cursor {
-        commands.entity(entity).despawn_children();
-
-        let Some(active_row) = cursor_row else {
-            continue;
-        };
-
-        if !show_cursor || cursor_line.row != active_row {
+        let row = cursor_line.row;
+        if row >= terminal.rows || !terminal.dirty_rows[row] {
             continue;
         }
 
-        let shape = cursor_shape.unwrap_or(CursorShape::Block);
-        let (width_px, height_px, top_px) =
-            cursor_dimensions(shape, terminal.cell_width_px, terminal.cell_height_px);
+        commands.entity(entity).despawn_children();
 
-        let left_px = cursor_col as f32 * terminal.cell_width_px;
+        let Some(cursor) = next_rows[row].cursor.as_ref() else {
+            continue;
+        };
+
+        if !cursor.visible {
+            continue;
+        }
+
+        let (width_px, height_px, top_px) = cursor_dimensions(
+            cursor.shape,
+            terminal.cell_width_px,
+            terminal.cell_height_px,
+        );
+
+        let left_px = cursor.col as f32 * terminal.cell_width_px;
 
         commands.entity(entity).with_children(|parent| {
             parent.spawn((
@@ -167,7 +215,13 @@ pub fn sync_terminal_view_system(
         });
     }
 
-    terminal.dirty = false;
+    for row in 0..terminal.rows {
+        if terminal.dirty_rows[row] {
+            cache.rows[row] = Some(next_rows[row].clone());
+        }
+    }
+
+    terminal.clear_dirty_flags();
 }
 
 fn cursor_dimensions(shape: CursorShape, cell_width: f32, cell_height: f32) -> (f32, f32, f32) {
